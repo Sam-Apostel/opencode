@@ -19,7 +19,13 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { EventV2 } from "@opencode-ai/core/event"
 
 const log = Log.create({ service: "share-next" })
-const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
+// ‹Agent› hardening: session sharing is permanently disabled in this build.
+// Upstream gates this behind the OPENCODE_DISABLE_SHARE opt-out; we replace it
+// with a hard constant so the remote share egress (opncd.ai / console sync) is
+// not reachable at all — no event subscribers are registered and every network
+// path below short-circuits. Keeping the Service/layer intact preserves the
+// Effect dependency graph for callers; only the capability is removed.
+const disabled: boolean = true
 
 export type Api = {
   create: string

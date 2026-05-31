@@ -249,22 +249,16 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    // share/unshare errors aren't all client-induced — storage and network
-    // failures from SessionShare are real possibilities. Map to a typed 500
-    // (matches the legacy route behavior which routed any failure through
-    // ErrorMiddleware → NamedError.Unknown 500) instead of blanket-mapping
-    // every failure to a 400 BadRequest.
+    // ‹Agent› hardening: session sharing is removed from this build. These
+    // routes stay registered so the API surface/contract is unchanged for
+    // clients, but they no longer invoke the share service or touch the
+    // network — they return the session unmodified. The underlying ShareNext
+    // egress is also hard-disabled (see share/share-next.ts).
     const share = Effect.fn("SessionHttpApi.share")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      yield* shareSvc.share(ctx.params.sessionID).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
       return yield* requireSession(ctx.params.sessionID)
     })
 
     const unshare = Effect.fn("SessionHttpApi.unshare")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      yield* shareSvc
-        .unshare(ctx.params.sessionID)
-        .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
       return yield* requireSession(ctx.params.sessionID)
     })
 

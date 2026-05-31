@@ -2,7 +2,6 @@ import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import * as Log from "@opencode-ai/core/util/log"
@@ -69,7 +68,6 @@ function eventResponse() {
 export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handlers) =>
   Effect.gen(function* () {
     const config = yield* Config.Service
-    const installation = yield* Installation.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -95,36 +93,20 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
-    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
-      const method = yield* installation.method()
-      if (method === "unknown") {
-        return {
-          status: 400,
-          body: { success: false as const, error: "Unknown installation method" },
-        }
-      }
-      const target = ctx.payload.target || (yield* installation.latest(method))
-      const result = yield* installation.upgrade(method, target).pipe(
-        Effect.as({ status: 200, body: { success: true as const, version: target } }),
-        Effect.catch((err) =>
-          Effect.succeed({
-            status: 500,
-            body: {
-              success: false as const,
-              error: err instanceof Error ? err.message : String(err),
-            },
-          }),
-        ),
-      )
-      if (!result.body.success) return result
-      GlobalBus.emit("event", {
-        directory: "global",
-        payload: {
-          type: Installation.Event.Updated.type,
-          properties: { version: target },
+    // ‹Agent› hardening: in-app self-upgrade is disabled. This build is updated
+    // through the internal distribution feed, so the route no longer invokes the
+    // installation service or reaches any release channel — it returns a clear
+    // disabled response while keeping the API contract intact.
+    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (_ctx: {
+      payload: typeof GlobalUpgradeInput.Type
+    }) {
+      return {
+        status: 403,
+        body: {
+          success: false as const,
+          error: "In-app upgrade is disabled in this build; updates are managed by the internal distribution feed.",
         },
-      })
-      return result
+      }
     })
 
     const upgradeRaw = Effect.fn("GlobalHttpApi.upgradeRaw")(function* (ctx: {
