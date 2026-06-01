@@ -106,32 +106,22 @@ type BundledSDK = {
   languageModel(modelId: string): LanguageModelV3
 }
 
+// ‹Agent› hardening: GitHub Copilot-only build. All branded non-Copilot provider
+// SDK loaders (openai, google, bedrock, azure, xai, mistral, groq, cohere,
+// openrouter, gitlab, venice, …) are removed so their packages are never
+// imported/bundled. Only three loaders remain:
+//   - "@ai-sdk/github-copilot": the Copilot provider itself.
+//   - "@ai-sdk/anthropic": Copilot's `/v1/messages` shim is served through it
+//     (see plugin/github-copilot: models tagged npm "@ai-sdk/anthropic"); only
+//     ever reached via the github-copilot provider.
+//   - "@ai-sdk/openai-compatible": the generic base used by the Copilot
+//     foundation and by any provider an operator explicitly declares in config
+//     (e.g. a sanctioned internal gateway). Not a branded provider on its own.
 const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>> = {
-  "@ai-sdk/amazon-bedrock": () => import("@ai-sdk/amazon-bedrock").then((m) => m.createAmazonBedrock),
   "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic").then((m) => m.createAnthropic),
-  "@ai-sdk/azure": () => import("@ai-sdk/azure").then((m) => m.createAzure),
-  "@ai-sdk/google": () => import("@ai-sdk/google").then((m) => m.createGoogleGenerativeAI),
-  "@ai-sdk/google-vertex": () => import("@ai-sdk/google-vertex").then((m) => m.createVertex),
-  "@ai-sdk/google-vertex/anthropic": () =>
-    import("@ai-sdk/google-vertex/anthropic").then((m) => m.createVertexAnthropic),
-  "@ai-sdk/openai": () => import("@ai-sdk/openai").then((m) => m.createOpenAI),
   "@ai-sdk/openai-compatible": () => import("@ai-sdk/openai-compatible").then((m) => m.createOpenAICompatible),
-  "@openrouter/ai-sdk-provider": () => import("@openrouter/ai-sdk-provider").then((m) => m.createOpenRouter),
-  "@ai-sdk/xai": () => import("@ai-sdk/xai").then((m) => m.createXai),
-  "@ai-sdk/mistral": () => import("@ai-sdk/mistral").then((m) => m.createMistral),
-  "@ai-sdk/groq": () => import("@ai-sdk/groq").then((m) => m.createGroq),
-  "@ai-sdk/deepinfra": () => import("@ai-sdk/deepinfra").then((m) => m.createDeepInfra),
-  "@ai-sdk/cerebras": () => import("@ai-sdk/cerebras").then((m) => m.createCerebras),
-  "@ai-sdk/cohere": () => import("@ai-sdk/cohere").then((m) => m.createCohere),
-  "@ai-sdk/gateway": () => import("@ai-sdk/gateway").then((m) => m.createGateway),
-  "@ai-sdk/togetherai": () => import("@ai-sdk/togetherai").then((m) => m.createTogetherAI),
-  "@ai-sdk/perplexity": () => import("@ai-sdk/perplexity").then((m) => m.createPerplexity),
-  "@ai-sdk/vercel": () => import("@ai-sdk/vercel").then((m) => m.createVercel),
-  "@ai-sdk/alibaba": () => import("@ai-sdk/alibaba").then((m) => m.createAlibaba),
-  "gitlab-ai-provider": () => import("gitlab-ai-provider").then((m) => m.createGitLab),
   "@ai-sdk/github-copilot": () =>
     import("@opencode-ai/core/github-copilot/copilot-provider").then((m) => m.createOpenaiCompatible),
-  "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
@@ -1264,8 +1254,21 @@ export const layer = Layer.effect(
         const configProviders = Object.entries(cfg.provider ?? {})
         const disabled = new Set(cfg.disabled_providers ?? [])
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
+        const configProviderIDs = new Set(configProviders.map(([id]) => id))
 
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
+          // ‹Agent› hardening: this is a GitHub Copilot-only build. The only
+          // providers that may load are:
+          //   1. github-copilot (incl. enterprise) — the sanctioned provider.
+          //   2. providers an operator EXPLICITLY declares in config
+          //      (cfg.provider) — e.g. a sanctioned internal OpenAI-compatible
+          //      gateway. This is intentional, admin-controlled, and still
+          //      bounded by the network egress allowlist.
+          // Every auto-loaded / catalog / branded provider (anthropic, openai,
+          // google, bedrock, azure, xai, ...) is blocked here regardless of
+          // config flags or env API keys. This is the authoritative gate; the
+          // final provider set is filtered through it below.
+          if (!providerID.startsWith("github-copilot") && !configProviderIDs.has(providerID)) return false
           if (enabled && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
           return true

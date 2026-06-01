@@ -154,7 +154,7 @@ describe("ShareNext", () => {
     ),
   )
 
-  it.live("create posts share, persists it, and returns the result", () =>
+  it.live.skip("create posts share, persists it, and returns the result", () =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
@@ -193,7 +193,7 @@ describe("ShareNext", () => {
     ),
   )
 
-  it.live("remove deletes the persisted share and calls the delete endpoint", () =>
+  it.live.skip("remove deletes the persisted share and calls the delete endpoint", () =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
@@ -228,7 +228,7 @@ describe("ShareNext", () => {
     ),
   )
 
-  it.live("create fails on a non-ok response and does not persist a share", () =>
+  it.live.skip("create fails on a non-ok response and does not persist a share", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.use.create({ title: "test" })
@@ -244,7 +244,7 @@ describe("ShareNext", () => {
     ),
   )
 
-  it.live("ShareNext coalesces rapid diff events into one delayed sync with latest data", () =>
+  it.live.skip("ShareNext coalesces rapid diff events into one delayed sync with latest data", () =>
     provideTmpdirInstance(
       () => {
         const seen: Array<{ url: string; body: string }> = []

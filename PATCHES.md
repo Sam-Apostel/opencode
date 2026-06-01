@@ -41,20 +41,39 @@ guarantee enforced outside this repo).
   default, opt-in, and only exports to a configured OTLP collector. Left as-is;
   point it at our collector via config if/when we want agent telemetry. No
   uncontrolled egress in the default build.
-- **Non-Copilot providers** (anthropic/openai/google/xai/openrouter, their
-  `HTTP-Referer: https://opencode.ai/` headers, and the `opencode.ai/zen|go`
-  upsell links): marked *optional* removal in the handoff. They are
-  **config-gated** (`disabled_providers` / `enabled_providers` in
-  `config/config.ts`) and blocked by the egress allowlist regardless. Recommended
-  to lock to Copilot-only via shipped default config rather than deleting
-  provider code (deletion cascades through the provider registry and raises the
-  rebase tax). Tracked as a config-overlay task, not an upstream edit.
 - **Dead installer helpers** left in `installation/index.ts` after the body
   rewrites (`run`, `getBrewFormula`, the release-response schemas, `http`/
   `httpOk`): retained so the layer's `HttpClient` requirement still matches its
   explicit type annotation. They contain **no external URLs** (verified) and are
   unreachable. A lint-only cleanup pass can remove them later; not a security
   concern.
+
+---
+
+## Phase 2.5 — Copilot-only provider lock + models.dev egress cut
+
+Locks the agent to GitHub Copilot. Three enforcement layers + a catalog-egress cut.
+
+| # | File | Change | Why |
+|---|------|--------|-----|
+| 7 | `provider/provider.ts` — `isProviderAllowed` | Authoritative gate now allows **only** `github-copilot*` providers **and** providers explicitly declared in `cfg.provider` (operator-configured, e.g. a sanctioned internal OpenAI-compatible gateway). Every auto-loaded / catalog / branded provider (anthropic, openai, google, bedrock, azure, xai, …) is blocked regardless of `enabled_providers`/`disabled_providers` or env API keys. | Code-enforced Copilot-only usage that config/env cannot bypass. The final provider set is filtered through this gate (`provider.ts` ~line 1487). |
+| 8 | `provider/provider.ts` — `BUNDLED_PROVIDERS` | Trimmed to three SDK loaders: `@ai-sdk/github-copilot` (Copilot), `@ai-sdk/anthropic` (Copilot's `/v1/messages` shim — see `plugin/github-copilot/models.ts`, models tagged npm `@ai-sdk/anthropic`), and `@ai-sdk/openai-compatible` (generic base for the Copilot foundation + operator-config providers). All branded loaders removed → their packages are never imported. | "Not in the binary" for branded providers. |
+| 9 | `plugin/index.ts` — `internalPlugins` | Returns only `CopilotAuthPlugin`. Removed Codex/OpenAI, GitLab, Poe, Cloudflare (×2), Azure, DigitalOcean, xAI auth plugins + their imports. | No login flow / endpoint for any non-Copilot provider exists in the build. |
+| 10 | `packages/core/src/models-dev.ts` | **Removed the `https://models.dev/api.json` fetch + scheduled refresh + Flock + HTTP client entirely.** Catalog now sourced only from local data (on-disk `OPENCODE_MODELS_PATH`/cache, or the build-time `OPENCODE_MODELS_DEV` snapshot), falling back to a minimal `github-copilot` scaffold; `refresh()` is a no-op. | Cuts the off-allowlist models.dev egress. Copilot's real model list is fetched live from the Copilot API by the auth plugin and attaches onto the scaffold (empty `models` map is correct). Copilot-only *usage* is enforced by the gate above, not by filtering the catalog (keeps the catalog usable for tests/local config). |
+
+### KEPT
+- `@ai-sdk/openai-compatible` SDK loader (generic; not a branded provider).
+- The core `plugin/provider/*.ts` transform modules (llmgateway/openrouter/nvidia/…)
+  are untouched — they're inert without a corresponding allowed provider, and
+  their unit tests still pass. Optional further cleanup, not required.
+
+### Test-suite impact (this is the "fix tests" half)
+A strong Copilot-only lock invalidates opencode's multi-provider test suite. Changes made so CI is green:
+- **Deleted** wholly-obsolete branded-provider test files: `test/provider/{digitalocean,amazon-bedrock,gitlab-duo,cf-ai-gateway-e2e}.test.ts`.
+- **`.skip`** on individual cases that exercise removed behavior (branded providers / share / updater / UI proxy), with the rest of each file intact:
+  `test/provider/provider.test.ts` (catalog/branded/Google-Vertex/opencode-loader cases), `test/provider/header-timeout.test.ts` (OpenAI), `test/server/httpapi-provider.test.ts`, `test/session/llm.test.ts` (OpenAI responses), plus the Phase-2 fallout: `test/share/share-next.test.ts` (4), `test/server/httpapi-ui.test.ts` (proxy, 6), `test/server/httpapi-global.test.ts` (upgrade), and `describe.skip` for `test/installation/installation.test.ts` (`latest`/`upgrade`) and `test/session/llm-native-recorded.test.ts` (branded replay scenarios).
+- Rewrote `packages/core/test/models.test.ts` to assert the no-egress contract (mock HttpClient is never called) instead of the old fetch/cache behavior.
+- **Pre-existing/unrelated failures in this sandbox (NOT caused by these changes, left as-is):** `tool.write > throws error when OS denies write access` (runs as root), `HttpApi Server.listen > … does not emit Effect HTTP response logs`, and `continues loading tui config when legacy source cannot be stripped`. Verified they fail with these changes stashed.
 
 ---
 

@@ -9,16 +9,12 @@ import { Config } from "@/config/config"
 import * as Log from "@opencode-ai/core/util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { ServerAuth } from "@/server/auth"
-import { CodexAuthPlugin } from "./openai/codex"
 import { Session } from "@/session/session"
 import { NamedError } from "@opencode-ai/core/util/error"
+// ‹Agent› hardening: GitHub Copilot-only build. Every non-Copilot auth plugin
+// (Codex/OpenAI, GitLab, Poe, Cloudflare, Azure, DigitalOcean, xAI) is removed,
+// so their login flows and provider endpoints are not present in the binary.
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
-import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
-import { PoeAuthPlugin } from "opencode-poe-auth"
-import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
-import { AzureAuthPlugin } from "./azure"
-import { DigitalOceanAuthPlugin } from "./digitalocean"
-import { XaiAuthPlugin } from "./xai"
 import { Effect, Layer, Context } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -62,23 +58,10 @@ export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel
   return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
 }
 
-// Built-in plugins that are directly imported (not installed from npm)
-function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
-  return [
-    // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
-    (input) =>
-      CodexAuthPlugin(input, {
-        experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
-      }),
-    CopilotAuthPlugin,
-    GitlabAuthPlugin,
-    PoeAuthPlugin,
-    CloudflareWorkersAuthPlugin,
-    CloudflareAIGatewayAuthPlugin,
-    AzureAuthPlugin,
-    DigitalOceanAuthPlugin,
-    XaiAuthPlugin,
-  ]
+// Built-in plugins that are directly imported (not installed from npm).
+// ‹Agent› hardening: GitHub Copilot is the only bundled provider auth plugin.
+function internalPlugins(_flags: RuntimeFlags.Info): PluginInstance[] {
+  return [CopilotAuthPlugin]
 }
 
 function isServerPlugin(value: unknown): value is PluginInstance {

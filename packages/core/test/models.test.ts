@@ -7,23 +7,21 @@ import { Global } from "@opencode-ai/core/global"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { EventV2 } from "@opencode-ai/core/event"
 import { it } from "./lib/effect"
-import { rm, writeFile, utimes, mkdir } from "fs/promises"
+import { rm, writeFile, mkdir } from "fs/promises"
 import path from "path"
 
-// test/preload.ts pins OPENCODE_MODELS_PATH to a fixture so other tests can
-// resolve providers without network. These tests need to drive the on-disk
-// cache themselves and silence the eager refresh fork. Save/restore around
-// the suite — never leak the mutation to subsequent test files in the same
-// bun process.
+// ‹Agent› hardening: this is a GitHub Copilot-only build. The models.dev catalog
+// fetch has been removed — ModelsDev performs NO network egress. It loads the
+// catalog from local data only (on-disk cache / compiled snapshot), falling back
+// to a github-copilot scaffold. These tests are the regression guard for the
+// no-egress property: a mock HttpClient is wired in and asserted to be NEVER
+// called, across get() and refresh().
 const ORIGINAL_MODELS_PATH = Flag.OPENCODE_MODELS_PATH
-const ORIGINAL_DISABLE_FETCH = Flag.OPENCODE_DISABLE_MODELS_FETCH
 beforeAll(() => {
   Flag.OPENCODE_MODELS_PATH = undefined
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = true
 })
 afterAll(() => {
   Flag.OPENCODE_MODELS_PATH = ORIGINAL_MODELS_PATH
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
 })
 
 const cacheFile = path.join(Global.Path.cache, "models.json")
@@ -48,62 +46,32 @@ const fixture: Record<string, ModelsDev.Provider> = {
   },
 }
 
-const fixture2: Record<string, ModelsDev.Provider> = {
-  beta: {
-    id: "beta",
-    name: "Beta",
-    env: ["BETA_API_KEY"],
-    models: {
-      "beta-1": {
-        id: "beta-1",
-        name: "Beta One",
-        release_date: "2026-02-01",
-        attachment: false,
-        reasoning: true,
-        temperature: false,
-        tool_call: false,
-        limit: { context: 64000, output: 4096 },
-      },
-    },
-  },
-}
-
 interface MockState {
-  body: string
-  status: number
-  calls: Array<{ url: string; userAgent: string | null }>
+  calls: Array<{ url: string }>
 }
 
 const makeMockClient = (state: Ref.Ref<MockState>) =>
   HttpClient.make((request) =>
     Effect.gen(function* () {
-      yield* Ref.update(state, (s) => ({
-        ...s,
-        calls: [...s.calls, { url: request.url, userAgent: request.headers["user-agent"] ?? null }],
-      }))
-      const s = yield* Ref.get(state)
-      return HttpClientResponse.fromWeb(request, new Response(s.body, { status: s.status }))
+      yield* Ref.update(state, (s) => ({ calls: [...s.calls, { url: request.url }] }))
+      return HttpClientResponse.fromWeb(request, new Response("{}", { status: 200 }))
     }),
   )
 
 const buildLayer = (state: Ref.Ref<MockState>) =>
-  // Layer.fresh is required: ModelsDev.layer is a module-level Layer constant,
-  // and Effect.provide uses a process-global MemoMap by default — without fresh,
-  // every test would reuse the cachedInvalidateWithTTL state from the first run.
+  // Layer.fresh: ModelsDev.layer is a module-level constant and Effect.provide
+  // uses a process-global MemoMap, so without fresh every test reuses the first
+  // run's cached catalog.
   Layer.fresh(ModelsDev.layer).pipe(
     Layer.provide(Layer.succeed(HttpClient.HttpClient, makeMockClient(state))),
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(EventV2.defaultLayer),
   )
 
-const writeCache = (data: object, mtimeMs?: number) =>
+const writeCache = (data: object) =>
   Effect.promise(async () => {
     await mkdir(Global.Path.cache, { recursive: true })
     await writeFile(cacheFile, JSON.stringify(data))
-    if (mtimeMs !== undefined) {
-      const t = mtimeMs / 1000
-      await utimes(cacheFile, t, t)
-    }
   })
 
 const provided = <A, E>(state: Ref.Ref<MockState>, eff: Effect.Effect<A, E, ModelsDev.Service>) =>
@@ -117,17 +85,11 @@ afterAll(async () => {
   await rm(cacheFile, { force: true })
 })
 
-const initialState: MockState = {
-  body: JSON.stringify(fixture),
-  status: 200,
-  calls: [],
-}
-
-describe("ModelsDev Service", () => {
-  it.live("get() returns providers from disk when cache file exists", () =>
+describe("ModelsDev Service (Copilot-only, no egress)", () => {
+  it.live("get() returns the on-disk catalog without any network access", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      const state = yield* Ref.make(initialState)
+      const state = yield* Ref.make<MockState>({ calls: [] })
       const result = yield* provided(
         state,
         ModelsDev.Service.use((s) => s.get()),
@@ -138,117 +100,42 @@ describe("ModelsDev Service", () => {
     }),
   )
 
-  it.live("get() returns empty catalog when disk empty, fetch disabled, and no bundled snapshot is injected", () =>
+  it.live("get() falls back to a github-copilot scaffold when no local catalog exists, no network", () =>
     Effect.gen(function* () {
-      const state = yield* Ref.make(initialState)
+      const state = yield* Ref.make<MockState>({ calls: [] })
       const result = yield* provided(
         state,
         ModelsDev.Service.use((s) => s.get()),
       )
-      expect(result).toEqual({})
+      expect(Object.keys(result)).toEqual(["github-copilot"])
+      expect(result["github-copilot"]?.id).toBe("github-copilot")
       const final = yield* Ref.get(state)
       expect(final.calls).toEqual([])
     }),
   )
 
-  it.live("get() is single-flight under concurrent calls", () =>
+  it.live("get() is single-flight/cached across concurrent calls and never hits the network", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      const state = yield* Ref.make(initialState)
+      const state = yield* Ref.make<MockState>({ calls: [] })
       const results = yield* provided(
         state,
         Effect.gen(function* () {
           const svc = yield* ModelsDev.Service
-          return yield* Effect.all([svc.get(), svc.get(), svc.get(), svc.get(), svc.get()], {
-            concurrency: "unbounded",
-          })
+          return yield* Effect.all([svc.get(), svc.get(), svc.get()], { concurrency: "unbounded" })
         }),
       )
       for (const result of results) expect(result).toEqual(fixture)
-    }),
-  )
-
-  it.live("get() caches across calls (later disk writes are ignored until invalidate)", () =>
-    Effect.gen(function* () {
-      yield* writeCache(fixture)
-      const state = yield* Ref.make(initialState)
-      const first = yield* provided(
-        state,
-        Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
-          const a = yield* svc.get()
-          // mutate disk between calls — cache should mask the change
-          yield* writeCache(fixture2)
-          const b = yield* svc.get()
-          return { a, b }
-        }),
-      )
-      expect(first.a).toEqual(fixture)
-      expect(first.b).toEqual(fixture)
-    }),
-  )
-
-  it.live("refresh(true) fetches via HttpClient and updates the cache", () =>
-    Effect.gen(function* () {
-      yield* writeCache(fixture)
-      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
-      const result = yield* provided(
-        state,
-        Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
-          const before = yield* svc.get()
-          yield* svc.refresh(true)
-          const after = yield* svc.get()
-          return { before, after }
-        }),
-      )
-      expect(result.before).toEqual(fixture)
-      expect(result.after).toEqual(fixture2)
-      const final = yield* Ref.get(state)
-      expect(final.calls.length).toBe(1)
-      expect(final.calls[0].url).toContain("/api.json")
-      expect(final.calls[0].userAgent).toContain("/cli")
-    }),
-  )
-
-  it.live("refresh(false) skips fetch when on-disk file is fresh", () =>
-    Effect.gen(function* () {
-      // Fresh: mtime within the 5-minute TTL.
-      yield* writeCache(fixture, Date.now() - 1000)
-      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
-      yield* provided(
-        state,
-        ModelsDev.Service.use((s) => s.refresh(false)),
-      )
       const final = yield* Ref.get(state)
       expect(final.calls).toEqual([])
     }),
   )
 
-  it.live("refresh(false) fetches when on-disk file is stale", () =>
-    Effect.gen(function* () {
-      // Stale: mtime 10 minutes ago, beyond the 5-minute TTL.
-      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
-      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
-      const after = yield* provided(
-        state,
-        Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
-          yield* svc.refresh(false)
-          return yield* svc.get()
-        }),
-      )
-      const final = yield* Ref.get(state)
-      expect(final.calls.length).toBe(1)
-      expect(after).toEqual(fixture2)
-    }),
-  )
-
-  it.live("refresh swallows HTTP errors and leaves cache intact", () =>
+  it.live("refresh(true) is a no-op and makes no network calls", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      const state = yield* Ref.make({ ...initialState, status: 500, body: "boom" })
-      const result = yield* provided(
+      const state = yield* Ref.make<MockState>({ calls: [] })
+      const after = yield* provided(
         state,
         Effect.gen(function* () {
           const svc = yield* ModelsDev.Service
@@ -256,10 +143,9 @@ describe("ModelsDev Service", () => {
           return yield* svc.get()
         }),
       )
-      expect(result).toEqual(fixture)
-      // retryTransient retries 5xx, so calls may be > 1.
+      expect(after).toEqual(fixture)
       const final = yield* Ref.get(state)
-      expect(final.calls.length).toBeGreaterThanOrEqual(1)
+      expect(final.calls).toEqual([])
     }),
   )
 })

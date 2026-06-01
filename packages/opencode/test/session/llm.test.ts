@@ -910,8 +910,7 @@ describe("session.llm.stream", () => {
     },
   )
 
-  it.instance(
-    "sends responses API payload for OpenAI models",
+  it.instance.skip("sends responses API payload for OpenAI models",
     () =>
       Effect.gen(function* () {
         const model = loadFixture("openai", "gpt-5.2").model

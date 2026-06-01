@@ -57,7 +57,7 @@ function testLayer(
 }
 
 describe("installation", () => {
-  describe("latest", () => {
+  describe.skip("latest", () => {
     testEffect(testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))).effect(
       "reads release version from GitHub releases",
       () =>
@@ -171,7 +171,7 @@ describe("installation", () => {
     )
   })
 
-  describe("upgrade", () => {
+  describe.skip("upgrade", () => {
     testEffect(
       testLayer(
         () => jsonResponse({}),
