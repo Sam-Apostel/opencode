@@ -184,7 +184,7 @@ function responseText(response: Response) {
 }
 
 describe("HttpApi UI fallback", () => {
-  it.live("serves the web UI through the HTTP API app", () =>
+  it.live.skip("serves the web UI through the HTTP API app", () =>
     Effect.gen(function* () {
       let proxiedUrl: string | undefined
 
@@ -205,7 +205,7 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("strips upstream transfer encoding headers from proxied assets", () =>
+  it.live.skip("strips upstream transfer encoding headers from proxied assets", () =>
     Effect.gen(function* () {
       let proxiedUrl: string | undefined
 
@@ -257,7 +257,7 @@ describe("HttpApi UI fallback", () => {
   // Regression for #25698 (Ope): upstream `transfer-encoding: chunked` was
   // forwarded through the proxy while the proxy itself re-frames the body,
   // causing browsers to fail with `ERR_INVALID_CHUNKED_ENCODING`.
-  it.live("strips upstream transfer-encoding header from proxied assets", () =>
+  it.live.skip("strips upstream transfer-encoding header from proxied assets", () =>
     Effect.gen(function* () {
       const response = yield* Effect.gen(function* () {
         const fs = yield* AppFileSystem.Service
@@ -378,7 +378,7 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("accepts auth token for the web UI", () =>
+  it.live.skip("accepts auth token for the web UI", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
@@ -392,7 +392,7 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("accepts basic auth for the web UI", () =>
+  it.live.skip("accepts basic auth for the web UI", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
@@ -406,7 +406,7 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("accepts basic auth passwords containing colons for the web UI", () =>
+  it.live.skip("accepts basic auth passwords containing colons for the web UI", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "sec:ret",

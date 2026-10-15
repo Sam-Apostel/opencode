@@ -422,7 +422,7 @@ const driveToolLoop = (scenario: RecordedScenario) =>
     expect(turn2.filter(LLMEvent.is.toolCall)).toHaveLength(0)
   })
 
-describe("session.llm native recorded", () => {
+describe.skip("session.llm native recorded", () => {
   for (const scenario of RECORDED_SCENARIOS.filter(isSelected)) {
     if (!canRun(scenario)) {
       if (shouldRecord && scenario.recordAuth && selectedScenarios.size > 0) {

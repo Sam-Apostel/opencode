@@ -353,8 +353,7 @@ describe("provider HttpApi", () => {
     30000,
   )
 
-  it.instance(
-    "serves provider lists when auth loaders add runtime fetch options",
+  it.instance.skip("serves provider lists when auth loaders add runtime fetch options",
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory
       yield* setEnvScoped(

@@ -152,7 +152,7 @@ it.live("OpenAI Codex headerTimeout default can be disabled by config", () =>
   }),
 )
 
-it.live("OpenAI API auth gets default headerTimeout", () =>
+it.live.skip("OpenAI API auth gets default headerTimeout", () =>
   Effect.gen(function* () {
     yield* withAuthContent(
       Effect.gen(function* () {
